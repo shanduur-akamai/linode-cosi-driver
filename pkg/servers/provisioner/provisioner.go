@@ -35,17 +35,28 @@ type Server struct {
 	log  *slog.Logger
 	once sync.Once
 
-	client linodeclient.Client
+	client      linodeclient.Client
+	s3AccessKey string
+	s3SecretKey string
+	s3SSL       bool
 }
 
 // Interface guards.
 var _ cosi.ProvisionerServer = (*Server)(nil)
 
 // New returns provisioner.Server with default values.
-func New(logger *slog.Logger, client linodeclient.Client) (*Server, error) {
+func New(
+	logger *slog.Logger,
+	client linodeclient.Client,
+	s3AccessKey, s3SecretKey string,
+	s3SSL bool,
+) (*Server, error) {
 	srv := &Server{
-		log:    logger,
-		client: client,
+		log:         logger,
+		client:      client,
+		s3AccessKey: s3AccessKey,
+		s3SecretKey: s3SecretKey,
+		s3SSL:       s3SSL,
 	}
 
 	return srv, nil
@@ -57,7 +68,6 @@ func (s *Server) logAttr(attr ...slog.Attr) *slog.Logger {
 			s.log = slog.Default()
 		}
 	})
-
 	return slog.New(s.log.Handler().WithAttrs(attr))
 }
 
@@ -70,6 +80,7 @@ func (s *Server) DriverCreateBucket(ctx context.Context, req *cosi.DriverCreateB
 	label := req.GetName()
 	region := req.GetParameters()[ParamRegion]
 	cors := ParamCORSValue(req.GetParameters()[ParamCORS])
+	policyTemplate := ParamCORSValue(req.GetParameters()[ParamPolicy])
 
 	acl := linodego.ObjectStorageACL(req.GetParameters()[ParamACL])
 	if acl == "" {
@@ -112,6 +123,10 @@ func (s *Server) DriverCreateBucket(ctx context.Context, req *cosi.DriverCreateB
 		}
 
 		log.InfoContext(ctx, "Bucket created")
+
+		if policyTemplate != "" {
+			log.InfoContext(ctx, "Updating policy")
+		}
 
 		return &cosi.DriverCreateBucketResponse{
 			BucketId:   bucket.Region + "/" + bucket.Label,

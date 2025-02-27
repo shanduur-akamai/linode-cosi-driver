@@ -1,4 +1,4 @@
-// Copyright 2023-2024 Akamai Technologies, Inc.
+// Copyright 2023-2025 Akamai Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ const (
 	ParamACL         = "cosi.linode.com/v1/acl"
 	ParamCORS        = "cosi.linode.com/v1/cors"
 	ParamPermissions = "cosi.linode.com/v1/permissions"
+	ParamPolicy      = "cosi.linode.com/v1/policy"
 )
 
 type ParamCORSValue string

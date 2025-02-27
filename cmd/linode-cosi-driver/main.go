@@ -49,22 +49,34 @@ const (
 	envK8sPodName  = "K8S_POD_NAME"
 )
 
+var ErrNoKeySpecified = errors.New("no S3 policy credentials, " +
+	"when S3_CLIENT_EPHEMERAL_CREDENTIALS is not set or false " +
+	"you need to provide S3_ACCESS_KEY and S3_SECRET_KEY")
+
 func main() {
 	var (
-		linodeToken      = envflag.String("LINODE_TOKEN", "")
-		linodeURL        = envflag.String("LINODE_API_URL", "")
-		linodeAPIVersion = envflag.String("LINODE_API_VERSION", "")
-		cosiEndpoint     = envflag.String("COSI_ENDPOINT", "unix:///var/lib/cosi/cosi.sock")
+		s3SSL                  = envflag.Bool("S3_CLIENT_SSL_ENABLED", true)
+		s3EphemeralCredentials = envflag.Bool("S3_CLIENT_EPHEMERAL_CREDENTIALS", true)
+		s3AccessKey            = envflag.String("S3_ACCESS_KEY", "")
+		s3SecretKey            = envflag.String("S3_SECRET_KEY", "")
+		linodeToken            = envflag.String("LINODE_TOKEN", "")
+		linodeURL              = envflag.String("LINODE_API_URL", "")
+		linodeAPIVersion       = envflag.String("LINODE_API_VERSION", "")
+		cosiEndpoint           = envflag.String("COSI_ENDPOINT", "unix:///var/lib/cosi/cosi.sock")
 	)
 
 	// TODO: any logger settup must be done here, before first log call.
 	log := slog.Default()
 
 	if err := run(context.Background(), log, mainOptions{
-		cosiEndpoint:     cosiEndpoint,
-		linodeToken:      linodeToken,
-		linodeURL:        linodeURL,
-		linodeAPIVersion: linodeAPIVersion,
+		s3SSL:                  s3SSL,
+		s3EphemeralCredentials: s3EphemeralCredentials,
+		s3AccessKey:            s3AccessKey,
+		s3SecretKey:            s3SecretKey,
+		cosiEndpoint:           cosiEndpoint,
+		linodeToken:            linodeToken,
+		linodeURL:              linodeURL,
+		linodeAPIVersion:       linodeAPIVersion,
 	},
 	); err != nil {
 		slog.Error("Critical failure", "error", err)
@@ -73,10 +85,14 @@ func main() {
 }
 
 type mainOptions struct {
-	cosiEndpoint     string
-	linodeToken      string
-	linodeURL        string
-	linodeAPIVersion string
+	s3SSL                  bool
+	s3EphemeralCredentials bool
+	s3AccessKey            string
+	s3SecretKey            string
+	cosiEndpoint           string
+	linodeToken            string
+	linodeURL              string
+	linodeAPIVersion       string
 }
 
 func run(ctx context.Context, log *slog.Logger, opts mainOptions) error {
@@ -110,10 +126,32 @@ func run(ctx context.Context, log *slog.Logger, opts mainOptions) error {
 
 	client.SetLogger(logutils.ForResty(log))
 
+	if opts.s3EphemeralCredentials {
+		creds, cleanup, err := linodeclient.NewEphemeralS3Credentials(ctx, client)
+		if err != nil {
+			return fmt.Errorf("unable to create ephemeral credentials: %w", err)
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+			defer cancel()
+			if err := cleanup(ctx); err != nil {
+				log.Error("unable to cleanup ephemeral credentials", "error", err)
+			}
+		}()
+		opts.s3AccessKey = creds.AccessKey
+		opts.s3SecretKey = creds.SecretKey
+	}
+
+	if opts.s3AccessKey == "" || opts.s3SecretKey == "" {
+		return ErrNoKeySpecified
+	}
+
 	// create provisioner server
 	prvSrv, err := provisioner.New(
 		log,
 		client,
+		opts.s3AccessKey, opts.s3SecretKey,
+		opts.s3SSL,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create provisioner server: %w", err)
